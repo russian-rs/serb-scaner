@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  php:
+    build:
+      context: ./
+      dockerfile: docker/php/Dockerfile
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./app/back:/app
+      - ./app/document:/document
+    depends_on:
+      - db
+    environment:
+      - PHP_IDE_CONFIG=serverName=Docker
+
+  db:
+    image: postgres:13-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: app
+    ports:
+      - "54321:5432"
