@@ -2,6 +2,7 @@
 
 namespace App\Console;
 
+
 use Illuminate\Console\Scheduling\Schedule;
 use Laravel\Lumen\Console\Kernel as ConsoleKernel;
 
@@ -16,6 +17,7 @@ class Kernel extends ConsoleKernel
         \App\Console\Commands\ParseLawsCommand::class,
         \App\Console\Commands\SaveLawsCommand::class,
         \App\Console\Commands\TranslateLawsCommand::class,
+        \App\Console\Commands\VacanciesScraping\ParseInfostudCommand::class,
     ];
 
     /**
