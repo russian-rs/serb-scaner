@@ -3,12 +3,17 @@
 namespace App\Console\Commands\VacanciesScraping;
 
 
+use App\DTO\VacancyDTO;
+use App\Handlers\TextHandler;
+use App\Models\Vacancy;
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Http;
 
 class ParseInfostudCommand extends Command
 {
-    protected string $siteDomen = 'https://poslovi.infostud.com/';
+    protected string $siteDomen = 'https://poslovi.infostud.com';
     /**
      * Имя и сигнатура консольной команды.
      *
@@ -32,14 +37,37 @@ class ParseInfostudCommand extends Command
     {
         $this->info('Начинаем парсинг страницы...');
 
+        $links = $this->getAllLinks();
+        $vacanciesInfo = [];
+
+        foreach ($links as $link)
+        {
+            try {
+                $vacanciesInfo[] = $this->parsePage($link);
+            }
+            catch (\Exception $e){
+                $this->error("Ошибка парсинга страницы $link : $e");
+            }
+        }
+
+        $this->saveVacancies($vacanciesInfo);
+
+        $this->info('Парсинг завершён!');
+
+    }
+
+    private function getAllLinks()
+    {
+        $links = [];
+        $urlListVacancies = 'https://poslovi.infostud.com/oglasi-za-posao?sort=online_view_date&page=';
+
         try {
+
+//            $pageCount = $this->getLastPaginationNumber($urlListVacancies);
+            $pageCount = 1;
+
             $client = new Client();
 
-            $urlListVacancies = 'https://poslovi.infostud.com/oglasi-za-posao?sort=online_view_date&page=';
-
-            $pageCount = $this->getPageCount($urlListVacancies);
-
-            $links = [];
             $dom = new \DOMDocument();
             $numberVacancyOnList = 0;
 
@@ -71,22 +99,24 @@ class ParseInfostudCommand extends Command
 
                         $numberVacancyOnList++;
                     } else {
-                        $this->info( "Элемент с id='oglas_$numberVacancyOnList' не найден");
+//                        $this->info( "Элемент с id='oglas_$numberVacancyOnList' не найден");
                         break;
                     }
 
                 }
             }
 
-            dump(count($links));
+            $this->info(count($links));
 
-            $this->info('Парсинг завершён!');
         } catch (\Exception $e) {
             $this->error('Ошибка при запросе страницы: ' . $e->getMessage());
         }
+
+        return $links;
     }
 
-    private function getPageCount(string $urlListVacancies)
+
+    private function getLastPaginationNumber(string $urlListVacancies)
     {
         try {
             $client = new Client();
@@ -115,6 +145,7 @@ class ParseInfostudCommand extends Command
                         // Извлекаем текстовое значение элемента <a>
                         $textValue = $aElement->textContent;
                         return $textValue;
+
                     } else {
                         $this->info( "Элемент <a> не найден.");
                     }
@@ -132,6 +163,59 @@ class ParseInfostudCommand extends Command
 
         return 100;
 
+    }
+
+
+    private function saveVacancies(array $vacanciesInfo)
+    {
+        //todo process saving to db
+    }
+
+
+    /**
+     * @throws GuzzleException
+     */
+    private function parsePage(string $link): VacancyDTO
+    {
+        $link = $this->siteDomen . $link;
+        $client = new Client();
+        $dom = new \DOMDocument();
+        $response = $client->get($link);
+        $html = $response->getBody()->getContents();
+        @$dom->loadHTML($html); // Используем @, чтобы скрыть предупреждения о некорректном HTML
+        $xpath = new \DOMXPath($dom);
+
+        // удалить все ненужные теги из дома чтобы не засорять текст
+        foreach (['script', 'style', 'noscript'] as $tag) {
+            foreach ($dom->getElementsByTagName($tag) as $node) {
+                $node->parentNode->removeChild($node);
+            }
+        }
+
+
+        $titleNode = $xpath->query('//*[contains(@class, "job__title")]');
+        $title = $titleNode->length > 0 ? trim($titleNode->item(0)->textContent) : '';
+        $title = TextHandler::cleanText($title);
+
+        $descriptionNode = $xpath->query('//*[contains(@id, "__fastedit_html_oglas")]');
+        $description = $descriptionNode->length > 0 ? trim($descriptionNode->item(0)->textContent) : '';
+        $description = TextHandler::cleanText($description);
+
+        $locationNode = $xpath->query('//*[contains(@class, "job__location")]');
+        $location = $locationNode->length > 0 ? trim($locationNode->item(0)->textContent) : '';
+        $location = TextHandler::cleanText($location);
+
+        $vacancy = new VacancyDTO(
+            title: $title,
+            link: $link,
+            description: $description,
+            salary: $salary ?? null,
+            location: $location,
+            publication_time: $publication_time ?? null,
+        );
+
+
+        return $vacancy;
     }
 
 
