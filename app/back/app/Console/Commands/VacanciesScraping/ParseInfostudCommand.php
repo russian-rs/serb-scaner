@@ -40,11 +40,10 @@ class ParseInfostudCommand extends Command
      */
     public function handle()
     {
-        $this->info('Начинаем парсинг страницы...');
+        $this->info('Начинаем парсинг...');
 
         $links = $this->getAllLinks();
         $vacanciesInfo = [];
-
         foreach ($links as $link)
         {
             try {
@@ -70,7 +69,6 @@ class ParseInfostudCommand extends Command
 
             $pageCount = $this->getLastPaginationNumber($urlListVacancies);
             $client = new Client();
-            $dom = new \DOMDocument();
             $numberVacancyOnList = 0;
 
             for ($k=1; $k <= $pageCount; $k++)
@@ -78,18 +76,19 @@ class ParseInfostudCommand extends Command
                 Log::debug($urlListVacancies . $k);
                 $response = $client->get($urlListVacancies . $k);
                 $html = $response->getBody()->getContents();
+                $dom = new \DOMDocument();
                 @$dom->loadHTML($html); // Используем @, чтобы скрыть предупреждения о некорректном HTML
                 $xpath = new \DOMXPath($dom);
 
                 while ($numberVacancyOnList < 100000){
                     $element = $xpath->query('//*[@id="oglas_'.$numberVacancyOnList.'"]');
                     if ($element->length > 0) {
-
                         // Находим ссылку на вакансию
                         $aElem = $xpath->query('.//a', $element->item(0));
 
                         if ($aElem->length > 0) {
                             $href = $aElem->item(0)->getAttribute('href');
+                            dump($href);
                             $links[] = $href;
                         } else {
                             Log::warning( "Ссылка <a> не найдена внутри #oglas_$numberVacancyOnList");
@@ -97,7 +96,6 @@ class ParseInfostudCommand extends Command
 
                         $numberVacancyOnList++;
                     } else {
-                        $numberVacancyOnList--;
                         break;
                     }
                 }
