@@ -4,12 +4,17 @@ namespace App\Console\Commands\VacanciesScraping;
 
 
 use App\DTO\VacancyDTO;
+use App\Enum\VacanciesSource;
 use App\Handlers\TextHandler;
 use App\Models\Vacancy;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Mockery\Exception;
 
 class ParseInfostudCommand extends Command
 {
@@ -63,25 +68,18 @@ class ParseInfostudCommand extends Command
 
         try {
 
-//            $pageCount = $this->getLastPaginationNumber($urlListVacancies);
-            $pageCount = 1;
-
+            $pageCount = $this->getLastPaginationNumber($urlListVacancies);
             $client = new Client();
-
             $dom = new \DOMDocument();
             $numberVacancyOnList = 0;
 
             for ($k=1; $k <= $pageCount; $k++)
             {
-                $this->info($urlListVacancies . $k);
-
+                Log::debug($urlListVacancies . $k);
                 $response = $client->get($urlListVacancies . $k);
                 $html = $response->getBody()->getContents();
-
                 @$dom->loadHTML($html); // Используем @, чтобы скрыть предупреждения о некорректном HTML
-
                 $xpath = new \DOMXPath($dom);
-
 
                 while ($numberVacancyOnList < 100000){
                     $element = $xpath->query('//*[@id="oglas_'.$numberVacancyOnList.'"]');
@@ -94,29 +92,26 @@ class ParseInfostudCommand extends Command
                             $href = $aElem->item(0)->getAttribute('href');
                             $links[] = $href;
                         } else {
-                            $this->info( "Ссылка <a> не найдена внутри #oglas_$numberVacancyOnList");
+                            Log::warning( "Ссылка <a> не найдена внутри #oglas_$numberVacancyOnList");
                         }
 
                         $numberVacancyOnList++;
                     } else {
-//                        $this->info( "Элемент с id='oglas_$numberVacancyOnList' не найден");
+                        $numberVacancyOnList--;
                         break;
                     }
-
                 }
             }
 
-            $this->info(count($links));
-
         } catch (\Exception $e) {
-            $this->error('Ошибка при запросе страницы: ' . $e->getMessage());
+            Log::error('Ошибка при запросе страницы: ' . $e->getMessage());
         }
 
         return $links;
     }
 
 
-    private function getLastPaginationNumber(string $urlListVacancies)
+    private function getLastPaginationNumber(string $urlListVacancies): int|string
     {
         try {
             $client = new Client();
@@ -147,18 +142,17 @@ class ParseInfostudCommand extends Command
                         return $textValue;
 
                     } else {
-                        $this->info( "Элемент <a> не найден.");
+                        Log::info( "Элемент <a> не найден.");
                     }
                 } else {
-                    $this->info( "Недостаточно элементов <li>.");
+                    Log::info( "Недостаточно элементов <li>.");
                 }
             } else {
-                $this->info( "Элемент <ul> не найден.");
+                Log::info( "Элемент <ul> не найден.");
             }
 
-
         }catch (\Exception $e){
-            $this->error('Ошибка при запросе страницы: ' . $e->getMessage());
+            Log::error('Ошибка при запросе страницы: ' . $e->getMessage());
         }
 
         return 100;
@@ -166,11 +160,30 @@ class ParseInfostudCommand extends Command
     }
 
 
-    private function saveVacancies(array $vacanciesInfo)
+    private function saveVacancies(array $vacancies)
     {
-        //todo process saving to db
-    }
+        DB::transaction(function () use ($vacancies) {
+            // Удаляем старые вакансии
+            Vacancy::where('source', VacanciesSource::InfoStud->name)->delete();
 
+            // Формируем массив для вставки
+            $data = array_map(fn(VacancyDTO $dto) => [
+                'title' => $dto->title,
+                'link' => $dto->link,
+                'description' => $dto->description,
+                'salary' => $dto->salary,
+                'location' => $dto->location,
+                'source' => $dto->source,
+                'publication_time' => $dto->publication_time,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ], $vacancies);
+
+            // Вставляем новые данные (bulk insert)
+            Vacancy::insert($data);
+        });
+
+    }
 
     /**
      * @throws GuzzleException
@@ -192,18 +205,36 @@ class ParseInfostudCommand extends Command
             }
         }
 
-
+        //название вакансии
         $titleNode = $xpath->query('//*[contains(@class, "job__title")]');
         $title = $titleNode->length > 0 ? trim($titleNode->item(0)->textContent) : '';
         $title = TextHandler::cleanText($title);
 
+        //описание вакансии
         $descriptionNode = $xpath->query('//*[contains(@id, "__fastedit_html_oglas")]');
         $description = $descriptionNode->length > 0 ? trim($descriptionNode->item(0)->textContent) : '';
         $description = TextHandler::cleanText($description);
 
+        //месторасположения вакансии
         $locationNode = $xpath->query('//*[contains(@class, "job__location")]');
         $location = $locationNode->length > 0 ? trim($locationNode->item(0)->textContent) : '';
         $location = TextHandler::cleanText($location);
+
+        //время публикации
+        $publication_time = null;
+        $headerNode = $xpath->query("//div[contains(@class, 'ogl-header')]")->item(0);
+        if ($headerNode) {
+            // Получаем весь текст внутри ogl-header
+            $text = $headerNode->textContent;
+
+            // Ищем дату в формате DD.MM.YYYY
+            if (preg_match('/\b\d{2}\.\d{2}\.\d{4}\b/', $text, $matches)) {
+                $publication_time = $matches[0];
+                try {
+                    $publication_time = Carbon::createFromFormat('d.m.Y', $publication_time)->startOfDay();
+                }catch (Exception $e){}
+            }
+        }
 
         $vacancy = new VacancyDTO(
             title: $title,
@@ -211,9 +242,9 @@ class ParseInfostudCommand extends Command
             description: $description,
             salary: $salary ?? null,
             location: $location,
-            publication_time: $publication_time ?? null,
+            source: VacanciesSource::InfoStud->name,
+            publication_time: $publication_time,
         );
-
 
         return $vacancy;
     }

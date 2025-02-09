@@ -16,6 +16,7 @@ class VacancyDTO
         public readonly string $description,
         public readonly ?string $salary,
         public readonly string $location,
+        public readonly string $source,
         public readonly ?Carbon $publication_time,
     )
     {}
