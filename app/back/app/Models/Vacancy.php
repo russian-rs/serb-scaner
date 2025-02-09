@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string                          $description          Описание вакансии
  * @property string                          $salary               Зарплата
  * @property string                          $location             Местоположение
+ * @property string                          $source               Источник вакансии (сайт)
  * @property \Illuminate\Support\Carbon|null $publication_time     Время публикации
  * @property \Illuminate\Support\Carbon|null $created_at           Время создания записи
  * @property \Illuminate\Support\Carbon|null $updated_at           Время последнего обновления записи
@@ -27,6 +28,7 @@ class Vacancy extends Model
         'description',
         'salary',
         'location',
+        'source',
         'publication_time',
         'created_at',
         'updated_at',
